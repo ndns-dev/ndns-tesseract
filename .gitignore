@@ -1,0 +1,40 @@
+# Go binaries and packages
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+
+# Test binaries
+*.test
+
+# Go module cache and build cache
+# These directories store downloaded Go modules and build artifacts.
+# They are not part of your project's source code and can be regenerated.
+.cache/
+go.sum
+go.mod.bak
+vendor/
+
+# IDE and Editor files
+.idea/
+.vscode/
+*.iml
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Build artifacts for Lambda deployment
+# Your Makefile generates these, so they should not be committed to Git.
+build/
+lambda_function.zip
+
+# Tesseract Layer artifacts
+tesseract_layer/
+tesseract_layer.zip
+
+# Environment variables files (if you use them for local development)
+.env
+.env.*
