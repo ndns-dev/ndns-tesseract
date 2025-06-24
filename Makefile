@@ -3,12 +3,12 @@
 # --- 변수 정의 ---
 PROFILE := ndns
 FUNCTION_NAME := ndns-tesseract
-REGION := ap-northeast-2 # 필요시 var.region처럼 변수로 분리 가능
+REGION := ap-northeast-2 
+LAYER_NAME := tesseract-layer
+LAYER_DESCRIPTION := "Tesseract OCR layer with Korean language support"
 
-# YOUR_TESSERACT_LAYER_ARN 값을 실제 ARN으로 대체하세요.
-# make get-arns 타겟을 실행하여 확인하거나 수동으로 입력하세요.
-# 예시: arn:aws:lambda:ap-northeast-2:123456789012:layer:tesseract-go-layer:1
-LAYER_ARN := arn:aws:lambda:ap-northeast-2:323502797000:layer:tesseract-go-layer:1
+# Layer ARN은 동적으로 가져옵니다
+LAYER_ARN := $(shell aws lambda list-layer-versions --profile $(PROFILE) --layer-name $(LAYER_NAME) --query 'LayerVersions[0].LayerVersionArn' --output text)
 
 # YOUR_LAMBDA_EXECUTION_ROLE_ARN 값을 실제 ARN으로 대체하세요.
 # make get-arns 타겟을 실행하여 확인하거나 수동으로 입력하세요.
@@ -21,11 +21,13 @@ BUILD_DIR := build
 BOOTSTRAP_NAME := bootstrap
 
 # Tesseract Layer 관련 파일 및 디렉토리
-TESSERACT_LAYER_DIR := tesseract_layer
-TESSERACT_LAYER_ZIP := tesseract_layer.zip
+TESSERACT_LAYER_DIR := tesseract-layer
+TESSERACT_LAYER_ZIP := tesseract-layer.zip
+S3_BUCKET_FOR_LAYERS := ndns-tesseract-s3
 
-# 환경 변수 (쉼표로 구분, 중괄호는 CLI에서 처리)
-ENV_VARS := "TESSDATA_PREFIX=/opt/share,ERROR_WEBHOOK_URL=https://discord.com/api/webhooks/1386267994648477707/Vq9PdkFPm2qa1-hedexV3vNGxF5C7XIWOFupg_eisv6fAMYEyqaqvvEHAHdFInjE1mIO"
+
+# 환경 변수
+ENV_VARS_JSON_STRING := {\"TESSDATA_PREFIX\":\"/opt/share\",\"LD_LIBRARY_PATH\":\"/opt/lib\",\"ERROR_WEBHOOK_URL\":\"https://discord.com/api/webhooks/1386515993656037436/K9D3F6OjJgY867UhWJ20AMhWtqOjn2mkyW3xbENrdyghVUQFC_YiNFuf4-8AiREo9FFe\"}
 
 # Lambda 설정
 TIMEOUT := 30
@@ -33,8 +35,14 @@ MEMORY := 512
 ARCHITECTURES := x86_64
 RUNTIME := provided.al2
 
+# AWS CLI가 설치되어 있고 설정되어 있는지 확인
+AWS_CLI := $(shell which aws) --profile ndns
+ifndef AWS_CLI
+$(error "AWS CLI is not installed or not in your PATH. Please install it: https://aws.amazon.com/cli/")
+endif
+
 # --- PHONY 타겟 (실제 파일이 아님을 명시) ---
-.PHONY: all build deploy update create clean get-arns tesseract-layer publish-tesseract-layer
+.PHONY: all build deploy update create clean get-arns tesseract-layer publish-tesseract-layer delete-layer-versions reset-layer
 
 # 기본 타겟: 빌드 후 배포 (업데이트)
 all: deploy
@@ -43,7 +51,7 @@ all: deploy
 build:
 	@echo "--- Building Go Lambda binary ---"
 	mkdir -p $(BUILD_DIR)/
-	env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o $(BUILD_DIR)/$(BOOTSTRAP_NAME) main.go
+	env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o $(BUILD_DIR)/$(BOOTSTRAP_NAME) main.go
 	@echo "--- Creating deployment package ($(ZIP_FILE)) ---"
 	cd $(BUILD_DIR) && zip -r ../$(ZIP_FILE) $(BOOTSTRAP_NAME)
 	@echo "Build complete: $(ZIP_FILE) created."
@@ -57,21 +65,42 @@ tesseract-layer:
 	cd .. # 다시 프로젝트 루트로 돌아옴
 	@echo "Tesseract Layer ZIP created: $(TESSERACT_LAYER_ZIP)"
 
-# Tesseract Layer를 AWS에 발행 (업데이트)하는 타겟
-# Layer는 버전이 있기 때문에, 매번 publish하면 새 버전이 생성됩니다.
-# Lambda 함수는 특정 Layer 버전을 바라보므로, Layer 업데이트 후에는 Lambda 함수 설정도 업데이트해야 할 수 있습니다.
-publish-tesseract-layer: tesseract-layer
-	@echo "--- Publishing Tesseract Layer to AWS ---"
-	aws lambda publish-layer-version \
-		--profile $(PROFILE) \
-		--layer-name tesseract-go-layer \
-		--description "Tesseract OCR binary and libraries for Go Lambda" \
-		--zip-file fileb://$(TESSERACT_LAYER_ZIP) \
-		--compatible-runtimes $(RUNTIME) \
-		--compatible-architectures $(ARCHITECTURES) \
-		--query 'LayerVersionArn' \
-		--output text
-	@echo "Tesseract Layer published. Remember to update LAYER_ARN in this Makefile if the version changed."
+build-tesseract-layer:
+	@echo "--- Deleting all versions of $(LAYER_NAME) ---"
+	$(AWS_CLI) lambda list-layer-versions --layer-name $(LAYER_NAME) --query 'LayerVersions[].Version' --output text | tr '\t' '\n' | xargs -I {} -r $(AWS_CLI) lambda delete-layer-version --layer-name $(LAYER_NAME) --version-number {}
+	@echo "All layer versions deleted."
+	@echo "--- Building Tesseract Layer Docker image $(ARCHITECTURES) ---"
+	docker buildx build --platform linux/amd64 --load -t $(LAYER_NAME) -f Dockerfile.layer .
+	@echo "--- Creating Lambda Layer .zip file from Docker image ---"
+	docker run --rm -v $(PWD)/out:/out \
+	           --user $(id -u):$(id -g) \
+	           --entrypoint /opt/bin/zip $(LAYER_NAME) \
+	           -r /out/$(TESSERACT_LAYER_ZIP) /opt/
+	@echo "Lambda Layer .zip file created at out/$(TESSERACT_LAYER_ZIP)"
+
+# publish-tesseract-layer: build-tesseract-layer
+# 	@echo "--- Publishing Tesseract Layer to AWS Lambda ---"
+# 	$(AWS_CLI) lambda publish-layer-version --layer-name $(LAYER_NAME) --description "Tesseract OCR with Korean language for Lambda" --zip-file fileb://out/$(TESSERACT_LAYER_ZIP) --compatible-runtimes python3.9 python3.10 python3.11 go1.x --region $(REGION) --compatible-architectures arm64
+# 	@echo "Layer published. Remember to attach it to your Lambda Function."
+
+publish-tesseract-layer: build-tesseract-layer
+	@echo "--- Uploading Tesseract Layer .zip to S3 ---"
+	$(AWS_CLI) s3 cp out/$(TESSERACT_LAYER_ZIP) s3://$(S3_BUCKET_FOR_LAYERS)/$(TESSERACT_LAYER_ZIP) --profile $(PROFILE) --region $(REGION)
+	@echo "--- Publishing Tesseract Layer to AWS Lambda from S3 ---"
+	$(AWS_CLI) lambda publish-layer-version \
+		--layer-name $(LAYER_NAME) \
+		--description $(LAYER_DESCRIPTION) \
+		--content S3Bucket=$(S3_BUCKET_FOR_LAYERS),S3Key=$(TESSERACT_LAYER_ZIP) \
+		--compatible-runtimes python3.9 python3.10 python3.11 go1.x \
+		--region $(REGION) \
+		--runtime go1.x \
+		--compatible-architectures $(ARCHITECTURES)
+
+delete-tesseract-layer:
+	@echo "--- Deleting all versions of $(LAYER_NAME) ---"
+	$(AWS_CLI) lambda list-layer-versions --layer-name $(LAYER_NAME) --query 'LayerVersions[].Version' --output text | tr '\t' '\n' | xargs -I {} -r $(AWS_CLI) lambda delete-layer-version --layer-name $(LAYER_NAME) --version-number {}
+	@echo "All layer versions deleted."
+
 
 # Go Lambda 함수 배포(업데이트) 타겟
 deploy: build
@@ -81,6 +110,10 @@ deploy: build
 		--function-name $(FUNCTION_NAME) \
 		--zip-file fileb://$(ZIP_FILE)
 
+	@echo "--- Getting latest layer version ARN ---"
+	$(eval LAYER_ARN := $(shell aws lambda list-layer-versions --profile $(PROFILE) --layer-name $(LAYER_NAME) --query 'LayerVersions[0].LayerVersionArn' --output text))
+	@echo "Using layer ARN: $(LAYER_ARN)"
+
 	@echo "--- Updating Lambda function configuration for $(FUNCTION_NAME) ---"
 	aws lambda update-function-configuration \
 		--profile $(PROFILE) \
@@ -88,8 +121,8 @@ deploy: build
 		--layers $(LAYER_ARN) \
 		--timeout $(TIMEOUT) \
 		--memory $(MEMORY) \
-		--environment Variables=$(ENV_VARS) \
-		--architectures $(ARCHITECTURES)
+		--runtime go1.x \
+		--environment "{\"Variables\": $(ENV_VARS_JSON_STRING)}"
 	@echo "Deployment (update) complete!"
 
 # Go Lambda 함수 생성 타겟 (처음 한 번만 사용)
@@ -105,8 +138,8 @@ create: build
 		--layers $(LAYER_ARN) \
 		--timeout $(TIMEOUT) \
 		--memory $(MEMORY) \
-		--environment Variables=$(ENV_VARS) \
-		--architectures $(ARCHITECTURES)
+		--environment "{\"Variables\": $(ENV_VARS_JSON_STRING)}" \
+		--architectures $(ARCHITECTURES)	
 	@echo "Lambda function created!"
 
 # 모든 빌드 아티팩트 삭제 타겟 (Go 바이너리 ZIP, Tesseract Layer ZIP)
@@ -126,3 +159,4 @@ get-arns:
 	  --layer-name tesseract-go-layer \
 	  --query 'LayerVersions[0].LayerVersionArn' \
 	  --output text
+

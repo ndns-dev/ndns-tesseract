@@ -1,0 +1,108 @@
+# Stage 1: Build Tesseract from source on Amazon Linux 2 (x86_64)
+FROM public.ecr.aws/lambda/python:3.9-x86_64 AS builder
+
+# Install build dependencies
+RUN yum update -y && \
+    yum install -y \
+    gcc-c++ \
+    make \
+    automake \
+    libtool \
+    pkgconfig \
+    zlib-devel \
+    libjpeg-turbo-devel \
+    libpng-devel \
+    libtiff-devel \
+    openjpeg2-devel \
+    giflib-devel \
+    libwebp-devel \
+    openblas-devel \
+    libicu-devel \
+    pango-devel \
+    cairo-devel \
+    fontconfig-devel \
+    glib2-devel \
+    gstreamer1-devel \
+    gstreamer1-plugins-base-devel \
+    libxml2-devel \
+    python3-devel \
+    lzip \
+    wget \
+    tar \
+    zip \
+    unzip \
+    && yum clean all
+
+# --- Leptonica 빌드 (단계 분리) ---
+WORKDIR /usr/src
+RUN wget https://github.com/DanBloomberg/leptonica/releases/download/1.83.0/leptonica-1.83.0.tar.gz -O leptonica-1.83.0.tar.gz
+RUN tar xzf leptonica-1.83.0.tar.gz
+RUN cd leptonica-1.83.0 && \
+    ./configure --prefix=/usr --enable-shared --disable-static --disable-dependency-tracking && \
+    make && \
+    make install
+RUN rm -rf leptonica-1.83.0 leptonica-1.83.0.tar.gz
+
+# --- Tesseract 빌드 (PKG_CONFIG_PATH 명시) ---
+    WORKDIR /usr/src
+    RUN wget https://github.com/tesseract-ocr/tesseract/archive/refs/tags/5.3.0.tar.gz -O tesseract-5.3.0.tar.gz
+    RUN tar xzf tesseract-5.3.0.tar.gz
+    RUN cd tesseract-5.3.0 && \
+        ./autogen.sh && \
+        PKG_CONFIG_PATH=/usr/lib/pkgconfig ./configure --prefix=/usr --enable-shared --disable-static \
+        LDFLAGS="-L/usr/lib" CFLAGS="-I/usr/include" \
+        --disable-march-native --disable-avx --disable-avx2 --disable-sse --disable-sse2 --disable-sse3 --disable-ssse3 --disable-sse4_1 --disable-sse4_2 && \
+        make && \
+        make install
+    RUN rm -rf tesseract-5.3.0 tesseract-5.3.0.tar.gz
+
+# Install Tesseract language data
+RUN mkdir -p /usr/share/tessdata
+RUN wget https://github.com/tesseract-ocr/tessdata_fast/raw/main/kor.traineddata -P /usr/share/tessdata/
+
+# Stage 2: Create the final Lambda Layer structure
+FROM public.ecr.aws/lambda/python:3.9-x86_64
+
+# Create directories for the Lambda Layer
+RUN mkdir -p /opt/bin /opt/lib /opt/share/tessdata
+
+
+RUN yum update -y && yum install -y zip && yum clean all
+
+# Copy Tesseract binary and essential libraries from the builder stage
+COPY --from=builder /usr/bin/tesseract /opt/bin/
+COPY --from=builder /usr/lib/liblept*.so* /opt/lib/
+COPY --from=builder /usr/lib/libtesseract*.so* /opt/lib/
+
+
+# 🚨🚨🚨 여기를 수정합니다: find 명령을 '/' (루트)에서 시작하여 zip 바이너리를 찾고 복사합니다. 🚨🚨🚨
+# 실패 시에도 빌드를 중단하지 않도록 || true를 추가합니다. (나중에 직접 확인)
+RUN ZIP_BINARY_PATH=$(find / -name "zip" -type f -executable 2>/dev/null | head -n 1) && \
+    if [ -n "$ZIP_BINARY_PATH" ]; then \
+        echo "Found zip at: $ZIP_BINARY_PATH"; \
+        cp -L "$ZIP_BINARY_PATH" /opt/bin/zip; \
+    else \
+        echo "Warning: zip binary not found anywhere! Layer .zip creation might fail."; \
+    fi || true
+
+# Copy common system libraries that Tesseract needs and might not be in Lambda's base
+RUN cp -L /usr/lib/libstdc++.so* /opt/lib/ || true && \
+    cp -L /usr/lib/libgcc_s.so* /opt/lib/ || true && \
+    cp -L /usr/lib/libgomp.so* /opt/lib/ || true && \
+    cp -L /usr/lib/libjpeg.so* /opt/lib/ || true && \
+    cp -L /usr/lib/libpng15.so* /opt/lib/ || true && \
+    cp -L /usr/lib/libtiff.so* /opt/lib/ || true && \
+    cp -L /usr/lib/libopenjp2.so* /opt/lib/ || true && \
+    cp -L /usr/lib/libgif.so* /opt/lib/ || true && \
+    cp -L /usr/lib/libwebp.so* /opt/lib/ || true && \
+    cp -L /usr/lib/libz.so* /opt/lib/ || true
+
+# Copy language data
+COPY --from=builder /usr/share/tessdata/kor.traineddata /opt/share/tessdata/
+
+# Set execute permissions
+RUN chmod 755 /opt/bin/tesseract && \
+    chmod 755 /opt/lib/*
+
+WORKDIR /opt
+CMD ["zip", "-r", "/out/tesseract-layer.zip", "."]
