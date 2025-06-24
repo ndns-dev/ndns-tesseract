@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-lambda-go/events"
@@ -15,66 +16,106 @@ import (
 	"github.com/ndns-dev/ndns-tesseract/src/utils"
 )
 
-func handleRequest(ctx context.Context, sqsEvent events.SQSEvent) (*customTypes.ErrorResponse, error) {
-	// ---- 에러 발생 시 중앙 처리 헬퍼 함수 ----
-	sendAndLogFinalError := func(err error, jobID, imageURL, source string) (*customTypes.ErrorResponse, error) {
-		errMsg := err.Error()
-		log.Printf("FINAL ERROR in %s: %s (JobID: %s, ImageURL: %s)", source, errMsg, jobID, imageURL)
-		utils.NotifyErrorToWebhook(ctx, "ERROR", errMsg, jobID, imageURL, source)
-		return &customTypes.ErrorResponse{
-			Message:   errMsg,
-			JobID:     jobID,
-			ImageURL:  imageURL,
-			ErrorCode: source,
-		}, nil
-	}
-	// ----------------------------------------
-
-	var jobID string                           // 모든 에러 처리 시 JobID를 전달하기 위해 미리 선언
-	var imageURL string                        // 모든 에러 처리 시 ImageURL을 전달하기 위해 미리 선언
-	var messageBody customTypes.SQSMessageBody // messageBody를 더 넓은 스코프에서 사용
-
-	if len(sqsEvent.Records) == 0 {
-		return sendAndLogFinalError(fmt.Errorf("no records in SQS event"), "", "", "SQSEventHandler")
+func handleRequest(ctx context.Context, event interface{}) (interface{}, error) {
+	eventBytes, err := json.Marshal(event)
+	if err != nil {
+		return utils.Response(utils.ErrorHandler(ctx, fmt.Errorf("failed to marshal event: %w", err), "", "", "EventMarshal"))
 	}
 
-	record := sqsEvent.Records[0]
+	var eventMap map[string]interface{}
+	if err := json.Unmarshal(eventBytes, &eventMap); err == nil {
+		// API Gateway 이벤트인지 확인
+		if _, hasBody := eventMap["body"]; hasBody {
+			if _, hasHeaders := eventMap["headers"]; hasHeaders {
+				// API Gateway 이벤트로 처리
+				var apiEvent events.APIGatewayProxyRequest
+				if err := json.Unmarshal(eventBytes, &apiEvent); err == nil {
+					return handleAPIGatewayEvent(ctx, apiEvent)
+				}
+			}
+		}
+	}
 
+	// SQS 이벤트 처리
+	if sqsEvent, ok := event.(events.SQSEvent); ok {
+		return handleSQSEvent(ctx, sqsEvent)
+	}
+
+	return utils.Response(utils.ErrorHandler(ctx, fmt.Errorf("unsupported event type"), "", "", "EventTypeHandler"))
+}
+
+func handleAPIGatewayEvent(ctx context.Context, e events.APIGatewayProxyRequest) (interface{}, error) {
+	var messageBody customTypes.SQSMessageBody
+	contentType := strings.ToLower(e.Headers["Content-Type"])
+
+	if strings.Contains(contentType, "application/x-www-form-urlencoded") {
+		formData := utils.ParseFormURLEncoded(e.Body)
+		messageBody.JobID = formData["jobId"]
+		messageBody.ImageURL = formData["imageUrl"]
+	} else {
+		err := json.Unmarshal([]byte(e.Body), &messageBody)
+		if err != nil {
+			return utils.Response(utils.ErrorHandler(ctx, fmt.Errorf("could not unmarshal HTTP request body: %w", err), "", "", "HTTPRequestUnmarshal"))
+		}
+	}
+
+	errResp, err := processOCRRequest(ctx, messageBody)
+	return utils.Response(errResp, err)
+}
+
+func handleSQSEvent(ctx context.Context, e events.SQSEvent) (interface{}, error) {
+	if len(e.Records) == 0 {
+		return utils.ErrorHandler(ctx, fmt.Errorf("no records in SQS event"), "", "", "SQSEventHandler")
+	}
+
+	record := e.Records[0]
+	var messageBody customTypes.SQSMessageBody
 	err := json.Unmarshal([]byte(record.Body), &messageBody)
 	if err != nil {
-		return sendAndLogFinalError(fmt.Errorf("could not unmarshal SQS message body: %w", err), "", "", "SQSMessageUnmarshal")
+		return utils.ErrorHandler(ctx, fmt.Errorf("could not unmarshal SQS message body: %w", err), "", "", "SQSMessageUnmarshal")
 	}
 
-	// Unmarshal 성공 후 JobID와 ImageURL 설정 (에러 컨텍스트에 포함)
-	jobID = messageBody.JobID
-	imageURL = messageBody.ImageURL
+	return processOCRRequest(ctx, messageBody)
+}
 
-	// JobID는 필수 확인 (Job당 이미지 1개로 가정)
-	if jobID == "" {
-		return sendAndLogFinalError(fmt.Errorf("SQS message body missing JobID"), "", imageURL, "SQSMessageValidation")
+func processOCRRequest(ctx context.Context, messageBody customTypes.SQSMessageBody) (*customTypes.ErrorResponse, error) {
+	var missingFields []string
+	if messageBody.JobID == "" {
+		missingFields = append(missingFields, "jobId")
+	}
+	if messageBody.ImageURL == "" {
+		missingFields = append(missingFields, "imageUrl")
+	}
+	if len(missingFields) > 0 {
+		return utils.ErrorHandler(
+			ctx,
+			fmt.Errorf("missing required fields: %s", strings.Join(missingFields, ", ")),
+			messageBody.JobID,
+			messageBody.ImageURL,
+			"RequestValidation",
+		)
 	}
 
-	log.Printf("Processing JobID: %s, ImageURL: %s", jobID, imageURL)
+	log.Printf("Processing JobID: %s, ImageURL: %s", messageBody.JobID, messageBody.ImageURL)
 
 	// --- OCR 수행을 위한 요청 바디 구성 ---
 	ocrRequestPayload := customTypes.OCRRequest{
-		ImageUrl: imageURL,
+		ImageUrl: messageBody.ImageURL,
 	}
 
 	// OCRRequestPayload를 JSON 바이트 배열로 마샬링
 	requestBodyBytes, err := json.Marshal(ocrRequestPayload)
 	if err != nil {
-		return sendAndLogFinalError(fmt.Errorf("failed to marshal OCR request payload: %w", err), jobID, imageURL, "MarshalOCRRequest")
+		return utils.ErrorHandler(ctx, fmt.Errorf("failed to marshal OCR request payload: %w", err), messageBody.JobID, messageBody.ImageURL, "MarshalOCRRequest")
 	}
-	// ------------------------------------
 
 	// OCR 수행
 	ocrResultDetails, ocrErr := ocr.PerformOCR(requestBodyBytes)
 
 	// 최종 결과를 저장할 customTypes.OCRJobDetails 객체 생성
 	finalResult := customTypes.OCRJobDetails{
-		JobID:     jobID,
-		ImageURL:  imageURL,
+		JobID:     messageBody.JobID,
+		ImageURL:  messageBody.ImageURL,
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
@@ -90,9 +131,9 @@ func handleRequest(ctx context.Context, sqsEvent events.SQSEvent) (*customTypes.
 
 	// 1. OCR JobDetails 테이블 업데이트
 	if err := utils.UpdateOCRJobDetails(ctx, finalResult); err != nil {
-		return sendAndLogFinalError(fmt.Errorf("failed to update OCRJobDetails for JobID %s: %w", jobID, err), jobID, imageURL, "UpdateOCRJobDetails")
+		return utils.ErrorHandler(ctx, fmt.Errorf("failed to update OCRJobDetails for JobID %s: %w", messageBody.JobID, err), messageBody.JobID, messageBody.ImageURL, "UpdateOCRJobDetails")
 	}
-	log.Printf("OCR JobDetails for JobID %s updated to status: %s", jobID, finalResult.Status)
+	log.Printf("OCR JobDetails for JobID %s updated to status: %s", messageBody.JobID, finalResult.Status)
 
 	// 2. OCR 성공 시에만 캐싱 테이블에 저장
 	if finalResult.Status == customTypes.JobStatusCompleted {
@@ -104,10 +145,20 @@ func handleRequest(ctx context.Context, sqsEvent events.SQSEvent) (*customTypes.
 			Timestamp: time.Now().Format(time.RFC3339),
 		}
 		if err := utils.SaveOCRResult(ctx, ocrResult); err != nil {
-			log.Printf("WARN: Failed to save OCR result to cache table for ImageURL %s (JobID: %s): %v", imageURL, jobID, err)
+			log.Printf("WARN: Failed to save OCR result to cache table for ImageURL %s (JobID: %s): %v", messageBody.ImageURL, messageBody.JobID, err)
 		} else {
-			log.Printf("OCR result for ImageURL %s (JobID: %s) saved to cache table.", imageURL, jobID)
+			log.Printf("OCR result for ImageURL %s (JobID: %s) saved to cache table.", messageBody.ImageURL, messageBody.JobID)
 		}
+	}
+
+	// OCR이 실패했을 경우 에러 반환
+	if finalResult.Status == customTypes.JobStatusFailed {
+		return &customTypes.ErrorResponse{
+			Message:   finalResult.Error,
+			JobID:     finalResult.JobID,
+			ImageURL:  finalResult.ImageURL,
+			ErrorCode: "OCRExecutionFailed",
+		}, fmt.Errorf(finalResult.Error)
 	}
 
 	// 성공 시 nil 반환
