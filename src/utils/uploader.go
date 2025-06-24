@@ -15,8 +15,8 @@ import (
 
 var dbClient *dynamodb.Client
 
-const ocrResultsTableName = "OCRResults"
-const ocrJobDetailsTableName = "OCRJobDetails"
+const ocrResultsTableName = "OcrResults"
+const ocrJobDetailsTableName = "OcrJobDetails"
 
 func init() {
 	cfg, err := config.LoadDefaultConfig(context.TODO())
