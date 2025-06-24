@@ -5,17 +5,38 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"time"
 )
 
 var webhookURL string
+var httpClient *http.Client
 
 func init() {
 	webhookURL = os.Getenv("ERROR_WEBHOOK_URL")
 	if webhookURL == "" {
 		log.Println("WARNING: ERROR_WEBHOOK_URL environment variable is not set. Error notifications will not be sent via webhook.")
+	}
+
+	// 커스텀 Transport 설정
+	transport := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second,  // 연결 타임아웃
+			KeepAlive: 30 * time.Second, // Keep-Alive 시간
+		}).DialContext,
+		MaxIdleConns:          100,              // 최대 유휴 연결 수
+		IdleConnTimeout:       90 * time.Second, // 유휴 연결 타임아웃
+		TLSHandshakeTimeout:   5 * time.Second,  // TLS 핸드쉐이크 타임아웃
+		ExpectContinueTimeout: 1 * time.Second,  // Expect: 100-continue에 대한 타임아웃
+		ResponseHeaderTimeout: 5 * time.Second,  // 응답 헤더 타임아웃
+	}
+
+	// HTTP 클라이언트 초기화
+	httpClient = &http.Client{
+		Transport: transport,
+		Timeout:   10 * time.Second, // 전체 요청 타임아웃
 	}
 }
 
@@ -46,33 +67,33 @@ func NotifyErrorToWebhook(ctx context.Context, level string, errMsg string, jobI
 
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("ERROR (Webhook GoRoutine): Failed to marshal webhook payload: %v", err)
+		log.Printf("ERROR (Webhook): Failed to marshal webhook payload: %v", err)
 		return
 	}
 
 	go func() {
-		localCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// 컨텍스트 타임아웃 설정 (10초)
+		localCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
 		req, err := http.NewRequestWithContext(localCtx, "POST", webhookURL, bytes.NewBuffer(jsonPayload))
 		if err != nil {
-			log.Printf("ERROR (Webhook GoRoutine): Failed to create webhook request: %v", err)
+			log.Printf("ERROR (Webhook): Failed to create webhook request: %v", err)
 			return
 		}
 		req.Header.Set("Content-Type", "application/json")
 
-		client := &http.Client{}
-		resp, err := client.Do(req)
+		resp, err := httpClient.Do(req)
 		if err != nil {
-			log.Printf("ERROR (Webhook GoRoutine): Failed to send webhook request: %v", err)
+			log.Printf("ERROR (Webhook): Failed to send webhook request: %v", err)
 			return
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			log.Printf("ERROR (Webhook GoRoutine): Webhook returned non-success status code: %d, Response: %s", resp.StatusCode, resp.Status)
+			log.Printf("ERROR (Webhook): Discord returned non-success status code: %d", resp.StatusCode)
 		} else {
-			log.Printf("INFO: Webhook notification sent successfully.")
+			log.Printf("INFO (Webhook): Notification sent successfully")
 		}
 	}()
 }
