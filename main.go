@@ -133,7 +133,7 @@ func processOCRRequest(ctx context.Context, messageBody customTypes.SQSMessageBo
 	if err := utils.UpdateOCRJobDetails(ctx, finalResult); err != nil {
 		return utils.ErrorHandler(ctx, fmt.Errorf("failed to update OCRJobDetails for JobID %s: %w", messageBody.JobID, err), messageBody.JobID, messageBody.ImageURL, "UpdateOCRJobDetails")
 	}
-	log.Printf("OCR JobDetails for JobID %s updated to status: %s", messageBody.JobID, finalResult.Status)
+	log.Printf("OCR JobDetails for JobID %s updated to status: %s with text: %s", messageBody.JobID, finalResult.Status, finalResult.OCRText)
 
 	// 2. OCR 성공 시에만 캐싱 테이블에 저장
 	if finalResult.Status == customTypes.JobStatusCompleted {
