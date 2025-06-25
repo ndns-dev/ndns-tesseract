@@ -43,6 +43,26 @@ func PerformOCR(requestBody []byte) (types.OCRJobDetails, error) {
 	}
 	log.Printf("Image fetched. Size: %d bytes", len(imageBytes))
 
+	// 🚨🚨🚨 Tesseract 바이너리 실행 권한 확인 및 디버그 로깅 🚨🚨🚨
+	fileInfo, err := os.Stat(tesseractCmdPath)
+	if err != nil {
+		log.Printf("ERROR: Failed to stat Tesseract binary at %s: %v", tesseractCmdPath, err)
+		// 디렉토리 내용 출력
+		if dirEntries, err := os.ReadDir("/opt/bin"); err == nil {
+			log.Printf("Contents of /opt/bin:")
+			for _, entry := range dirEntries {
+				info, _ := entry.Info()
+				if info != nil {
+					log.Printf("- %s (mode: %s)", entry.Name(), info.Mode().String())
+				} else {
+					log.Printf("- %s", entry.Name())
+				}
+			}
+		}
+		return types.OCRJobDetails{Status: types.JobStatusFailed, Error: fmt.Sprintf("Tesseract binary not found at %s", tesseractCmdPath)}, fmt.Errorf("tesseract binary not found")
+	}
+	log.Printf("Tesseract binary found at %s with mode: %s", tesseractCmdPath, fileInfo.Mode().String())
+
 	cmd := exec.Command(tesseractCmdPath, "-", "stdout", "-l", "kor", "--tessdata-dir", tessdataPath)
 	cmd.Stdin = bytes.NewReader(imageBytes)
 
