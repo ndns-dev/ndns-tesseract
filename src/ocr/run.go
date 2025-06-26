@@ -4,6 +4,7 @@ package ocr
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/ndns-dev/ndns-tesseract/src/types"
 	"github.com/ndns-dev/ndns-tesseract/src/utils"
@@ -64,7 +66,31 @@ func PerformOCR(requestBody []byte) (types.OCRJobDetails, error) {
 	log.Printf("Tesseract binary found at %s with mode: %s", tesseractCmdPath, fileInfo.Mode().String())
 
 	cmd := exec.Command(tesseractCmdPath, "-", "stdout", "-l", "kor", "--tessdata-dir", tessdataPath)
+
 	cmd.Stdin = bytes.NewReader(imageBytes)
+
+	// 🚨🚨🚨 Tesseract 바이너리 경로를 PATH에서 찾기 🚨🚨🚨
+	tesseractCmdPath, err := exec.LookPath("tesseract")
+	if err != nil {
+		log.Printf("ERROR: Tesseract binary not found in PATH: %v", err)
+		// /opt/bin 디렉토리 내용 디버깅 (여전히 유용할 수 있음)
+		dirEntries, readDirErr := os.ReadDir("/opt/bin")
+		if readDirErr != nil {
+			log.Printf("ERROR: Failed to read directory /opt/bin: %v", readDirErr)
+		} else {
+			log.Printf("Contents of /opt/bin:")
+			for _, entry := range dirEntries {
+				info, _ := entry.Info()
+				if info != nil {
+					log.Printf("- %s (mode: %s)", entry.Name(), info.Mode().String())
+				} else {
+					log.Printf("- %s", entry.Name())
+				}
+			}
+		}
+		return types.OCRJobDetails{Status: types.JobStatusFailed, Error: "Failed to find Tesseract"}, fmt.Errorf("tesseract binary not found")
+	}
+	log.Printf("INFO: Found Tesseract binary at: %s", tesseractCmdPath)
 
 	env := os.Environ() // 현재 환경 변수 복사
 
@@ -106,7 +132,7 @@ func PerformOCR(requestBody []byte) (types.OCRJobDetails, error) {
 
 	if err != nil {
 		stderrStr := strings.TrimSpace(stderr.String())
-		errMsg := fmt.Sprintf("tesseract 실행 실패: %v", err)
+		errMsg := fmt.Sprintf("Tesseract 실행 실패: %v", err)
 		if stderrStr != "" {
 			errMsg = fmt.Sprintf("%s - %s", errMsg, stderrStr)
 		}
@@ -120,9 +146,34 @@ func PerformOCR(requestBody []byte) (types.OCRJobDetails, error) {
 	ocrResult := strings.TrimSpace(stdout.String())
 	log.Printf("Tesseract stdout: %s", ocrResult)
 
-	// OCR 결과를 반환할 때 Status를 명시적으로 설정
-	return types.OCRJobDetails{
-		Status:  types.JobStatusCompleted,
-		OCRText: ocrResult,
-	}, nil
+	return types.OCRJobDetails{Status: types.JobStatusCompleted, OCRText: ocrResult}, nil
+}
+
+func RunOCR(imagePath string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "tesseract", imagePath, "stdout", "-l", "kor", "--psm", "6", "--oem", "3", "-c", "preserve_interword_spaces=1")
+
+	output, err := cmd.CombinedOutput()
+
+	// 컨텍스트 취소 확인
+	if ctx.Err() != nil {
+		fmt.Printf("Tesseract OCR 타임아웃: %v\n", ctx.Err())
+		return "", fmt.Errorf("tesseract OCR 타임아웃: %w", ctx.Err())
+	}
+
+	if err != nil {
+		fmt.Printf("Tesseract OCR 실행 오류: %v\n", err)
+		return "", err
+	}
+
+	textResult := strings.TrimSpace(string(output))
+
+	if textResult == "" || strings.Contains(textResult, "Estimating") {
+		fmt.Printf("Tesseract OCR 인식 불가: 결과 없음\n")
+		return "", fmt.Errorf("tesseract OCR 인식 불가: 결과 없음")
+	}
+
+	return textResult, nil
 }
