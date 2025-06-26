@@ -1,47 +1,67 @@
-# Stage 1: Tesseract 및 Leptonica 빌드를 위한 환경 설정
-# AWS Lambda Go 런타임 (Amazon Linux 2 기반)의 x86_64 이미지 사용
 FROM public.ecr.aws/lambda/provided:al2.2025.06.17.12
+
+# 기본 환경 설정 (타임존 등)
+ENV TZ=Asia/Seoul
 
 # 빌드 도구 및 런타임 의존성 설치
 RUN yum update -y && \
     yum install -y \
-    aclocal autoconf automake cmake freetype-devel gcc gcc-c++ \
-    git lcms2-devel libjpeg-devel libjpeg-turbo-devel autogen libtool \
+    aclocal autoconf automake libtool cmake freetype-devel gcc gcc-c++ \
+    git lcms2-devel libjpeg-devel libjpeg-turbo-devel \
     libpng-devel libtiff-devel libwebp-devel libzip-devel make zlib-devel wget \
     fontconfig pango cairo pixman-devel \
+    libarchive-devel \
+    zstd-devel \
+    pkgconfig \
     golang \
     && yum clean all && rm -rf /var/cache/yum
+
+# Go 설치 후, Go 바이너리가 PATH에 포함되도록 명시적으로 추가
+ENV PATH="/usr/lib/golang/bin:${PATH}"
 
 # Tesseract 및 Leptonica 버전 환경 변수 설정
 ENV LEPTONICA_VERSION="1.83.0"
 ENV TESSERACT_VERSION="5.3.0"
 
-WORKDIR /tmp/
+# Tesseract 빌드 및 설치를 위한 임시 작업 디렉토리
+WORKDIR /tmp/tesseract_build/
 
 # Tesseract 빌드 스크립트 복사 및 실행 권한 부여
-COPY build_tesseract.sh /tmp/build_tesseract.sh
-RUN chmod +x /tmp/build_tesseract.sh
+COPY build_tesseract_full.sh /tmp/tesseract_build/build_tesseract_full.sh
+RUN chmod +x /tmp/tesseract_build/build_tesseract_full.sh
 
 # 빌드 스크립트 실행
-RUN /tmp/build_tesseract.sh
+RUN /tmp/tesseract_build/build_tesseract_full.sh
 
+# Tesseract가 tessdata 및 라이브러리를 찾을 수 있도록 환경 변수 설정
 ENV TESSDATA_PREFIX=/opt/share/tessdata
-ENV LD_LIBRARY_PATH=/opt/lib:/usr/local/lib:$LD_LIBRARY_PATH
+ENV LD_LIBRARY_PATH=/opt/lib:/usr/local/lib:/usr/lib64:${LD_LIBRARY_PATH}
 
-# Go Lambda 핸들러 빌드 및 복사
-WORKDIR ${LAMBDA_TASK_ROOT}
+# --- Go 애플리케이션 빌드 단계 (경로 문제 해결) ---
+# Go 애플리케이션 빌드를 위한 별도의 임시 작업 디렉토리 생성
+WORKDIR /tmp/go_build/
 
-# GOPROXY를 direct로 설정하여 Go 모듈을 직접 다운로드하도록 합니다.
-ENV GOPROXY=direct
-
+# Go 모듈 파일 복사 및 의존성 다운로드
+# Dockerfile이 실행되는 로컬 빌드 컨텍스트에서 go.mod와 go.sum을 복사합니다.
+ENV GOPROXY=direct 
 COPY go.mod go.sum ./
 RUN go mod download
 
+# Go 소스 코드를 임시 빌드 디렉토리로 복사
+# `main.go` 파일이 Dockerfile과 같은 레벨에 있다고 가정합니다.
+# 만약 다른 Go 소스 파일이나 서브 디렉토리가 있다면 `COPY . .`을 사용하거나 필요한 파일/디렉토리를 명시적으로 추가하세요.
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o main main.go
-RUN mv main bootstrap
+# Go Lambda 핸들러 바이너리 빌드
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o bootstrap main.go
 
-ENTRYPOINT ["/var/task/bootstrap"]
+# --- 최종 람다 함수 실행 경로 설정 및 바이너리 복사 ---
+# 람다 함수는 /var/task 디렉토리에서 실행됩니다.
+# 빌드된 'bootstrap' 바이너리만 /var/task로 이동
+RUN mv /tmp/go_build/bootstrap /var/task/bootstrap
 
-CMD ["main"]
+WORKDIR ${LAMBDA_TASK_ROOT}
+
+# 람다 Entrypoint 및 CMD 설정
+ENTRYPOINT [ "/var/task/bootstrap" ]
+CMD [ "main" ]
