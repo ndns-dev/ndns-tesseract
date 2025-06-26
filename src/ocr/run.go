@@ -4,7 +4,6 @@ package ocr
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"time"
 
 	"github.com/ndns-dev/ndns-tesseract/src/types"
 	"github.com/ndns-dev/ndns-tesseract/src/utils"
@@ -65,7 +63,10 @@ func PerformOCR(requestBody []byte) (types.OCRJobDetails, error) {
 	}
 	log.Printf("Tesseract binary found at %s with mode: %s", tesseractCmdPath, fileInfo.Mode().String())
 
-	cmd := exec.Command(tesseractCmdPath, "-", "stdout", "-l", "kor", "--tessdata-dir", tessdataPath)
+	cmd := exec.Command(tesseractCmdPath, "-", "stdout", "-l", "kor", "--tessdata-dir", tessdataPath,
+		"--psm", "6",
+		"--oem", "3",
+		"-c", "preserve_interword_spaces=1")
 
 	cmd.Stdin = bytes.NewReader(imageBytes)
 
@@ -147,33 +148,4 @@ func PerformOCR(requestBody []byte) (types.OCRJobDetails, error) {
 	log.Printf("Tesseract stdout: %s", ocrResult)
 
 	return types.OCRJobDetails{Status: types.JobStatusCompleted, OCRText: ocrResult}, nil
-}
-
-func RunOCR(imagePath string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "tesseract", imagePath, "stdout", "-l", "kor", "--psm", "6", "--oem", "3", "-c", "preserve_interword_spaces=1")
-
-	output, err := cmd.CombinedOutput()
-
-	// 컨텍스트 취소 확인
-	if ctx.Err() != nil {
-		fmt.Printf("Tesseract OCR 타임아웃: %v\n", ctx.Err())
-		return "", fmt.Errorf("tesseract OCR 타임아웃: %w", ctx.Err())
-	}
-
-	if err != nil {
-		fmt.Printf("Tesseract OCR 실행 오류: %v\n", err)
-		return "", err
-	}
-
-	textResult := strings.TrimSpace(string(output))
-
-	if textResult == "" || strings.Contains(textResult, "Estimating") {
-		fmt.Printf("Tesseract OCR 인식 불가: 결과 없음\n")
-		return "", fmt.Errorf("tesseract OCR 인식 불가: 결과 없음")
-	}
-
-	return textResult, nil
 }
