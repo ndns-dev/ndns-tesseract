@@ -43,84 +43,13 @@ func PerformOCR(requestBody []byte) (types.OCRJobDetails, error) {
 	}
 	log.Printf("Image fetched. Size: %d bytes", len(imageBytes))
 
-	// 🚨🚨🚨 Tesseract 바이너리 실행 권한 확인 및 디버그 로깅 🚨🚨🚨
-	fileInfo, err := os.Stat(tesseractCmdPath)
-	if err != nil {
-		log.Printf("ERROR: Failed to stat Tesseract binary at %s: %v", tesseractCmdPath, err)
-		// 디렉토리 내용 출력
-		if dirEntries, err := os.ReadDir("/opt/bin"); err == nil {
-			log.Printf("Contents of /opt/bin:")
-			for _, entry := range dirEntries {
-				info, _ := entry.Info()
-				if info != nil {
-					log.Printf("- %s (mode: %s)", entry.Name(), info.Mode().String())
-				} else {
-					log.Printf("- %s", entry.Name())
-				}
-			}
-		}
-		return types.OCRJobDetails{Status: types.JobStatusFailed, Error: fmt.Sprintf("Tesseract binary not found at %s", tesseractCmdPath)}, fmt.Errorf("tesseract binary not found")
-	}
-	log.Printf("Tesseract binary found at %s with mode: %s", tesseractCmdPath, fileInfo.Mode().String())
-
 	cmd := exec.Command(tesseractCmdPath, "-", "stdout", "-l", "kor", "--tessdata-dir", tessdataPath,
 		"--psm", "6",
 		"--oem", "3",
 		"-c", "preserve_interword_spaces=1")
 
 	cmd.Stdin = bytes.NewReader(imageBytes)
-
-	// 🚨🚨🚨 Tesseract 바이너리 경로를 PATH에서 찾기 🚨🚨🚨
-	tesseractCmdPath, err := exec.LookPath("tesseract")
-	if err != nil {
-		log.Printf("ERROR: Tesseract binary not found in PATH: %v", err)
-		// /opt/bin 디렉토리 내용 디버깅 (여전히 유용할 수 있음)
-		dirEntries, readDirErr := os.ReadDir("/opt/bin")
-		if readDirErr != nil {
-			log.Printf("ERROR: Failed to read directory /opt/bin: %v", readDirErr)
-		} else {
-			log.Printf("Contents of /opt/bin:")
-			for _, entry := range dirEntries {
-				info, _ := entry.Info()
-				if info != nil {
-					log.Printf("- %s (mode: %s)", entry.Name(), info.Mode().String())
-				} else {
-					log.Printf("- %s", entry.Name())
-				}
-			}
-		}
-		return types.OCRJobDetails{Status: types.JobStatusFailed, Error: "Failed to find Tesseract"}, fmt.Errorf("tesseract binary not found")
-	}
-	log.Printf("INFO: Found Tesseract binary at: %s", tesseractCmdPath)
-
-	env := os.Environ() // 현재 환경 변수 복사
-
-	// LD_LIBRARY_PATH 추가 또는 업데이트
-	foundLibPath := false
-	for i, e := range env {
-		if strings.HasPrefix(e, "LD_LIBRARY_PATH=") {
-			env[i] = "LD_LIBRARY_PATH=/opt/lib:" + strings.TrimPrefix(e, "LD_LIBRARY_PATH=")
-			foundLibPath = true
-			break
-		}
-	}
-	if !foundLibPath {
-		env = append(env, "LD_LIBRARY_PATH=/opt/lib")
-	}
-
-	// TESSDATA_PREFIX 추가 또는 업데이트 (tessdataPath는 이미 /opt/share/tessdata)
-	foundTessDataPrefix := false
-	for i, e := range env {
-		if strings.HasPrefix(e, "TESSDATA_PREFIX=") {
-			env[i] = "TESSDATA_PREFIX=" + tessdataPath
-			foundTessDataPrefix = true
-			break
-		}
-	}
-	if !foundTessDataPrefix {
-		env = append(env, "TESSDATA_PREFIX="+tessdataPath)
-	}
-
+	env := os.Environ()
 	cmd.Env = env
 
 	var stdout bytes.Buffer
