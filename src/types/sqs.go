@@ -39,3 +39,10 @@ func (c *CrawlResult) GetImageUrlByPosition(position OcrPosition) string {
 		return ""
 	}
 }
+
+type TableName string
+
+const (
+	OcrResultTableName      TableName = "OcrResult"
+	OcrQueueStatusTableName TableName = "OcrQueueStatus"
+)

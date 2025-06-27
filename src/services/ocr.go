@@ -54,7 +54,7 @@ func HandleOcrWorkflow(ctx context.Context, queueState customTypes.OcrQueueState
 	}
 
 	_, err = dynamoClient.PutItem(ctx, &dynamodb.PutItemInput{
-		TableName: aws.String(utils.OcrResultTableName),
+		TableName: aws.String(string(customTypes.OcrResultTableName)),
 		Item:      item,
 	})
 	if err != nil {
