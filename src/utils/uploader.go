@@ -15,8 +15,8 @@ import (
 
 var dbClient *dynamodb.Client
 
-const ocrResultsTableName = "OcrResults"
-const ocrJobDetailsTableName = "OcrJobDetails"
+const OcrResultTableName = "OcrResult"
+const OcrQueueStatusTableName = "OcrQueueStatus"
 
 func init() {
 	cfg, err := config.LoadDefaultConfig(context.TODO())
@@ -28,24 +28,24 @@ func init() {
 	log.Printf("Utils: DynamoDB client initialized.")
 }
 
-// SaveOCRResult: OCR 결과를 캐싱 테이블(OCRResults)에 저장
-func SaveOCRResult(ctx context.Context, result customTypes.OCRResults) error {
-	// ImageURL이 OCRResults 테이블의 Partition Key이므로 비어있으면 안 됩니다.
-	if result.ImageURL == "" {
-		return fmt.Errorf("ImageURL cannot be empty when saving to OCRResultsCache table")
+// SaveOcrResult: OCR 결과를 캐싱 테이블(OcrResults)에 저장
+func SaveOcrResult(ctx context.Context, result customTypes.OcrResult) error {
+	// ImageURL이 OcrResults 테이블의 Partition Key이므로 비어있으면 안 됩니다.
+	if result.ImageUrl == "" {
+		return fmt.Errorf("ImageURL cannot be empty when saving to OcrResultsCache table")
 	}
 
 	item, err := attributevalue.MarshalMap(result)
 	if err != nil {
-		return fmt.Errorf("failed to marshal cache item for ImageURL %s: %w", result.ImageURL, err)
+		return fmt.Errorf("failed to marshal cache item for ImageURL %s: %w", result.ImageUrl, err)
 	}
 
 	_, err = dbClient.PutItem(ctx, &dynamodb.PutItemInput{
-		TableName: aws.String(ocrResultsTableName),
+		TableName: aws.String(OcrResultTableName),
 		Item:      item,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to put item in OCRResultsCache DynamoDB table for ImageURL %s: %w", result.ImageURL, err)
+		return fmt.Errorf("failed to put item in OcrResultsCache DynamoDB table for ImageURL %s: %w", result.ImageUrl, err)
 	}
 	return nil
 }
@@ -63,7 +63,7 @@ func UpdateOCRJobDetails(ctx context.Context, result customTypes.OCRJobDetails) 
 	}
 
 	_, err = dbClient.PutItem(ctx, &dynamodb.PutItemInput{
-		TableName: aws.String(ocrJobDetailsTableName),
+		TableName: aws.String(OcrQueueStatusTableName),
 		Item:      item,
 	})
 	if err != nil {
