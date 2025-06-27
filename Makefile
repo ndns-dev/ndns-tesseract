@@ -7,7 +7,7 @@ IMAGE_TAG := latest
 ROLE_ARN := arn:aws:iam::323502797000:role/lambda_ndns_tesseract_role
 AWS_ACCOUNT_ID := 323502797000
 # Lambda 설정
-TIMEOUT := 120
+TIMEOUT := 30
 MEMORY := 1024
 ARCHITECTURES := x86_64
 
