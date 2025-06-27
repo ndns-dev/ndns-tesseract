@@ -1,19 +1,13 @@
-// src/ocr/ocr.go
-
-package ocr
+package utils
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"strings"
-
-	"github.com/ndns-dev/ndns-tesseract/src/types"
-	"github.com/ndns-dev/ndns-tesseract/src/utils"
 )
 
 const tessdataPath = "/opt/share/tessdata"
@@ -21,25 +15,13 @@ const tesseractCmdPath = "/opt/bin/tesseract"
 
 // PerformOCR 함수는 이제 API Gateway 등으로부터 받은 전체 요청 바디를 받습니다.
 // 요청 바디 안에는 이미지 URL이 JSON 형태로 포함될 것이라고 가정합니다.
-func PerformOCR(requestBody []byte) (types.OCRJobDetails, error) {
-	var req types.OCRRequest
-	if err := json.Unmarshal(requestBody, &req); err != nil {
-		log.Printf("ERROR: Invalid request body: %v", err)
-		return types.OCRJobDetails{Status: types.JobStatusFailed, Error: "Invalid request body"}, fmt.Errorf("invalid request body: %w", err)
-	}
-
-	imageUrl := req.ImageUrl
-	if imageUrl == "" {
-		log.Print("ERROR: Image URL is missing in the request.")
-		return types.OCRJobDetails{Status: types.JobStatusFailed, Error: "Image URL is missing."}, fmt.Errorf("image URL is missing")
-	}
-
+func PerformOCR(imageUrl string) (string, error) {
 	// 1. 이미지 바이트를 메모리로 가져오기
 	log.Printf("Fetching image bytes from URL: %s", imageUrl)
-	imageBytes, err := utils.FetchImageBytes(imageUrl)
+	imageBytes, err := FetchImageBytes(imageUrl)
 	if err != nil {
 		log.Printf("ERROR: Failed to fetch image bytes from URL %s: %v", imageUrl, err)
-		return types.OCRJobDetails{Status: types.JobStatusFailed, Error: fmt.Sprintf("Failed to fetch image: %v", err)}, err
+		return "", fmt.Errorf("Failed to fetch image: %v", err)
 	}
 	log.Printf("Image fetched. Size: %d bytes", len(imageBytes))
 
@@ -67,14 +49,11 @@ func PerformOCR(requestBody []byte) (types.OCRJobDetails, error) {
 			errMsg = fmt.Sprintf("%s - %s", errMsg, stderrStr)
 		}
 		log.Printf("ERROR: %s", errMsg)
-		return types.OCRJobDetails{
-			Status: types.JobStatusFailed,
-			Error:  errMsg,
-		}, errors.New(errMsg)
+		return "", errors.New(errMsg)
 	}
 
-	ocrResult := strings.TrimSpace(stdout.String())
-	log.Printf("Tesseract stdout: %s", ocrResult)
+	OcrResult := strings.TrimSpace(stdout.String())
+	log.Printf("Tesseract stdout: %s", OcrResult)
 
-	return types.OCRJobDetails{Status: types.JobStatusCompleted, OCRText: ocrResult}, nil
+	return OcrResult, nil
 }

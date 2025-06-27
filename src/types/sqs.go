@@ -2,17 +2,6 @@ package types
 
 import "time"
 
-// OcrPosition은 Ocr을 수행할 이미지의 위치를 나타냅니다
-type OcrPosition string
-
-const (
-	OcrPositionFirstImage    OcrPosition = "FirstImageUrl"
-	OcrPositionFirstSticker  OcrPosition = "FirstStickerUrl"
-	OcrPositionSecondSticker OcrPosition = "SecondStickerUrl"
-	OcrPositionLastImage     OcrPosition = "LastImageUrl"
-	OcrPositionLastSticker   OcrPosition = "LastStickerUrl"
-)
-
 // OcrQueueState는 Ocr 처리 상태를 관리합니다
 type OcrQueueState struct {
 	JobId           string       `json:"JobId" dynamodbav:"JobId"`                     // 프라이머리 키
