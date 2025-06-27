@@ -44,14 +44,14 @@ type WebhookPayload struct {
 	Level     string `json:"level"`
 	Message   string `json:"message"`
 	Timestamp string `json:"timestamp"`
-	JobID     string `json:"jobId,omitempty"`
+	JobId     string `json:"JobId,omitempty"`
 	ImageURL  string `json:"imageUrl,omitempty"`
 	Source    string `json:"source"`
 }
 
 // NotifyErrorToWebhook: 웹훅으로 에러 메시지를 비동기적으로 전송합니다.
 // 이 함수는 'main.go'의 핸들러에서만 호출될 것을 상정합니다.
-func NotifyErrorToWebhook(ctx context.Context, level string, errMsg string, jobID string, imageURL string, source string) {
+func NotifyErrorToWebhook(ctx context.Context, level string, errMsg string, JobId string, imageURL string, source string) {
 	if webhookURL == "" {
 		return
 	}
@@ -60,7 +60,7 @@ func NotifyErrorToWebhook(ctx context.Context, level string, errMsg string, jobI
 		Level:     level,
 		Message:   errMsg,
 		Timestamp: time.Now().Format(time.RFC3339),
-		JobID:     jobID,
+		JobId:     JobId,
 		ImageURL:  imageURL,
 		Source:    source,
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,21 +46,42 @@ func handleRequest(ctx context.Context, event interface{}) (interface{}, error) 
 }
 
 func handleAPIGatewayEvent(ctx context.Context, e events.APIGatewayProxyRequest) (interface{}, error) {
-	var messageBody customTypes.SQSMessageBody
+	var queueState customTypes.OcrQueueState
 	contentType := strings.ToLower(e.Headers["Content-Type"])
 
 	if strings.Contains(contentType, "application/x-www-form-urlencoded") {
 		formData := utils.ParseFormURLEncoded(e.Body)
-		messageBody.JobID = formData["jobId"]
-		messageBody.ImageURL = formData["imageUrl"]
+		// queueState에 값 할당
+		queueState.JobId = formData["JobId"]
+		queueState.CurrentPosition = customTypes.OcrPosition(formData["currentPosition"])
+		queueState.Is2025OrLater, _ = strconv.ParseBool(formData["is2025OrLater"])
+		queueState.RequestedAt, _ = time.Parse(time.RFC3339, formData["requestedAt"])
+		queueState.CrawlResult = &customTypes.CrawlResult{
+			Url:              formData["crawlResult.url"],
+			FirstParagraph:   formData["crawlResult.firstParagraph"],
+			LastParagraph:    formData["crawlResult.lastParagraph"],
+			Content:          formData["crawlResult.content"],
+			FirstImageUrl:    formData["crawlResult.firstImageUrl"],
+			LastImageUrl:     formData["crawlResult.lastImageUrl"],
+			FirstStickerUrl:  formData["crawlResult.firstStickerUrl"],
+			SecondStickerUrl: formData["crawlResult.secondStickerUrl"],
+			LastStickerUrl:   formData["crawlResult.lastStickerUrl"],
+		}
+
+		// 디버그 로깅
+		log.Printf("Parsed form data - JobId: %s, URL: %s, Position: %s",
+			queueState.JobId,
+			queueState.CrawlResult.Url,
+			queueState.CurrentPosition)
+
 	} else {
-		err := json.Unmarshal([]byte(e.Body), &messageBody)
+		err := json.Unmarshal([]byte(e.Body), &queueState)
 		if err != nil {
-			return utils.Response(utils.ErrorHandler(ctx, fmt.Errorf("could not unmarshal HTTP request body: %w", err), "", "", "HTTPRequestUnmarshal"))
+			return utils.Response(utils.ErrorHandler(ctx, fmt.Errorf("could not unmarshal HTTP request body: %w", err), queueState.JobId, queueState.CrawlResult.Url, "HTTPRequestUnmarshal"))
 		}
 	}
 
-	errResp, err := processOCRRequest(ctx, messageBody)
+	errResp, err := processOCRRequest(ctx, queueState)
 	return utils.Response(errResp, err)
 }
 
@@ -69,44 +91,82 @@ func handleSQSEvent(ctx context.Context, e events.SQSEvent) (interface{}, error)
 	}
 
 	record := e.Records[0]
-	var messageBody customTypes.SQSMessageBody
-	err := json.Unmarshal([]byte(record.Body), &messageBody)
-	if err != nil {
+	var queueState customTypes.OcrQueueState
+
+	// SQS 메시지 바디를 파싱하여 map으로 변환
+	var bodyMap map[string]interface{}
+	if err := json.Unmarshal([]byte(record.Body), &bodyMap); err != nil {
 		return utils.ErrorHandler(ctx, fmt.Errorf("could not unmarshal SQS message body: %w", err), "", "", "SQSMessageUnmarshal")
 	}
 
-	return processOCRRequest(ctx, messageBody)
+	// queueState에 값 할당
+	if jobId, ok := bodyMap["JobId"].(string); ok {
+		queueState.JobId = jobId
+	}
+	if currentPosition, ok := bodyMap["currentPosition"].(string); ok {
+		queueState.CurrentPosition = customTypes.OcrPosition(currentPosition)
+	}
+	if is2025OrLater, ok := bodyMap["is2025OrLater"].(bool); ok {
+		queueState.Is2025OrLater = is2025OrLater
+	}
+	if requestedAt, ok := bodyMap["requestedAt"].(string); ok {
+		queueState.RequestedAt, _ = time.Parse(time.RFC3339, requestedAt)
+	}
+
+	// CrawlResult 파싱
+	if crawlResultMap, ok := bodyMap["crawlResult"].(map[string]interface{}); ok {
+		queueState.CrawlResult = &customTypes.CrawlResult{
+			Url:              getString(crawlResultMap, "url"),
+			FirstParagraph:   getString(crawlResultMap, "firstParagraph"),
+			LastParagraph:    getString(crawlResultMap, "lastParagraph"),
+			Content:          getString(crawlResultMap, "content"),
+			FirstImageUrl:    getString(crawlResultMap, "firstImageUrl"),
+			LastImageUrl:     getString(crawlResultMap, "lastImageUrl"),
+			FirstStickerUrl:  getString(crawlResultMap, "firstStickerUrl"),
+			SecondStickerUrl: getString(crawlResultMap, "secondStickerUrl"),
+			LastStickerUrl:   getString(crawlResultMap, "lastStickerUrl"),
+		}
+	}
+
+	// 디버그 로깅
+	log.Printf("Parsed SQS message - JobId: %s, URL: %s, Position: %s",
+		queueState.JobId,
+		queueState.CrawlResult.Url,
+		queueState.CurrentPosition)
+
+	return processOCRRequest(ctx, queueState)
 }
 
-func processOCRRequest(ctx context.Context, messageBody customTypes.SQSMessageBody) (*customTypes.ErrorResponse, error) {
-	var missingFields []string
-	if messageBody.JobID == "" {
-		missingFields = append(missingFields, "jobId")
+// getString은 map에서 안전하게 문자열 값을 추출하는 헬퍼 함수입니다.
+func getString(m map[string]interface{}, key string) string {
+	if val, ok := m[key].(string); ok {
+		return val
 	}
-	if messageBody.ImageURL == "" {
-		missingFields = append(missingFields, "imageUrl")
-	}
-	if len(missingFields) > 0 {
-		return utils.ErrorHandler(
-			ctx,
-			fmt.Errorf("missing required fields: %s", strings.Join(missingFields, ", ")),
-			messageBody.JobID,
-			messageBody.ImageURL,
-			"RequestValidation",
-		)
+	return ""
+}
+
+func processOCRRequest(ctx context.Context, queueState customTypes.OcrQueueState) (*customTypes.ErrorResponse, error) {
+	if queueState.JobId == "" {
+		return utils.ErrorHandler(ctx, fmt.Errorf("missing JobId"), "", "", "RequestValidation")
 	}
 
-	log.Printf("Processing JobID: %s, ImageURL: %s", messageBody.JobID, messageBody.ImageURL)
+	// CurrentPosition에 해당하는 이미지 URL 가져오기
+	imageUrl := queueState.CrawlResult.GetImageUrlByPosition(queueState.CurrentPosition)
+	if imageUrl == "" {
+		return utils.ErrorHandler(ctx, fmt.Errorf("no image URL found for position: %s", queueState.CurrentPosition), queueState.JobId, queueState.CrawlResult.Url, "RequestValidation")
+	}
 
-	// --- OCR 수행을 위한 요청 바디 구성 ---
+	log.Printf("Processing JobId: %s, URL: %s, Image URL: %s", queueState.JobId, queueState.CrawlResult.Url, imageUrl)
+
+	// OCR 수행을 위한 요청 바디 구성
 	ocrRequestPayload := customTypes.OCRRequest{
-		ImageUrl: messageBody.ImageURL,
+		ImageUrl: imageUrl,
 	}
 
 	// OCRRequestPayload를 JSON 바이트 배열로 마샬링
 	requestBodyBytes, err := json.Marshal(ocrRequestPayload)
 	if err != nil {
-		return utils.ErrorHandler(ctx, fmt.Errorf("failed to marshal OCR request payload: %w", err), messageBody.JobID, messageBody.ImageURL, "MarshalOCRRequest")
+		return utils.ErrorHandler(ctx, fmt.Errorf("failed to marshal OCR request payload: %w", err), queueState.JobId, queueState.CrawlResult.Url, "MarshalOCRRequest")
 	}
 
 	// OCR 수행
@@ -114,8 +174,8 @@ func processOCRRequest(ctx context.Context, messageBody customTypes.SQSMessageBo
 
 	// 최종 결과를 저장할 customTypes.OCRJobDetails 객체 생성
 	finalResult := customTypes.OCRJobDetails{
-		JobID:     messageBody.JobID,
-		ImageURL:  messageBody.ImageURL,
+		JobId:     queueState.JobId,
+		ImageURL:  imageUrl,
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
@@ -129,25 +189,25 @@ func processOCRRequest(ctx context.Context, messageBody customTypes.SQSMessageBo
 		finalResult.Error = ocrResultDetails.Error
 	}
 
-	// 1. OCR JobDetails 테이블 업데이트
+	// OCR JobDetails 테이블 업데이트
 	if err := utils.UpdateOCRJobDetails(ctx, finalResult); err != nil {
-		return utils.ErrorHandler(ctx, fmt.Errorf("failed to update OCRJobDetails for JobID %s: %w", messageBody.JobID, err), messageBody.JobID, messageBody.ImageURL, "UpdateOCRJobDetails")
+		return utils.ErrorHandler(ctx, fmt.Errorf("failed to update OCRJobDetails for JobId %s: %w", queueState.JobId, err), queueState.JobId, queueState.CrawlResult.Url, "UpdateOCRJobDetails")
 	}
-	log.Printf("OCR JobDetails for JobID %s updated to status: %s with text: %s", messageBody.JobID, finalResult.Status, finalResult.OCRText)
+	log.Printf("OCR JobDetails for JobId %s updated to status: %s", queueState.JobId, finalResult.Status)
 
-	// 2. OCR 성공 시에만 캐싱 테이블에 저장
+	// OCR 성공 시에만 캐싱 테이블에 저장
 	if finalResult.Status == customTypes.JobStatusCompleted {
 		ocrResult := customTypes.OCRResults{
-			ImageURL:  finalResult.ImageURL,
+			ImageURL:  imageUrl,
 			OCRText:   finalResult.OCRText,
 			Status:    customTypes.OCRStatus(customTypes.JobStatusCompleted),
 			Error:     finalResult.Error,
 			Timestamp: time.Now().Format(time.RFC3339),
 		}
 		if err := utils.SaveOCRResult(ctx, ocrResult); err != nil {
-			log.Printf("WARN: Failed to save OCR result to cache table for ImageURL %s (JobID: %s): %v", messageBody.ImageURL, messageBody.JobID, err)
+			log.Printf("WARN: Failed to save OCR result to cache table for URL %s (JobId: %s): %v", queueState.CrawlResult.Url, queueState.JobId, err)
 		} else {
-			log.Printf("OCR result for ImageURL %s (JobID: %s) saved to cache table.", messageBody.ImageURL, messageBody.JobID)
+			log.Printf("OCR result for URL %s (JobId: %s) saved to cache table.", queueState.CrawlResult.Url, queueState.JobId)
 		}
 	}
 
@@ -155,8 +215,8 @@ func processOCRRequest(ctx context.Context, messageBody customTypes.SQSMessageBo
 	if finalResult.Status == customTypes.JobStatusFailed {
 		return &customTypes.ErrorResponse{
 			Message:   finalResult.Error,
-			JobID:     finalResult.JobID,
-			ImageURL:  finalResult.ImageURL,
+			JobId:     finalResult.JobId,
+			ImageURL:  imageUrl,
 			ErrorCode: "OCRExecutionFailed",
 		}, fmt.Errorf(finalResult.Error)
 	}

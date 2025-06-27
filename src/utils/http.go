@@ -29,7 +29,7 @@ func Response(errResp *customTypes.ErrorResponse, err error) (interface{}, error
 		if errResp != nil {
 			return &events.APIGatewayProxyResponse{
 				StatusCode: 400,
-				Body:       fmt.Sprintf(`{"message": "%s", "jobId": "%s", "imageUrl": "%s", "errorCode": "%s"}`, errResp.Message, errResp.JobID, errResp.ImageURL, errResp.ErrorCode),
+				Body:       fmt.Sprintf(`{"message": "%s", "jobId": "%s", "imageUrl": "%s", "errorCode": "%s"}`, errResp.Message, errResp.JobId, errResp.ImageURL, errResp.ErrorCode),
 				Headers: map[string]string{
 					"Content-Type": "application/json",
 				},
@@ -53,13 +53,13 @@ func Response(errResp *customTypes.ErrorResponse, err error) (interface{}, error
 	}, nil
 }
 
-func ErrorHandler(ctx context.Context, err error, jobID, imageURL, source string) (*customTypes.ErrorResponse, error) {
+func ErrorHandler(ctx context.Context, err error, jobId, imageURL, source string) (*customTypes.ErrorResponse, error) {
 	errMsg := err.Error()
-	log.Printf("FINAL ERROR in %s: %s (JobID: %s, ImageURL: %s)", source, errMsg, jobID, imageURL)
-	NotifyErrorToWebhook(ctx, "ERROR", errMsg, jobID, imageURL, source)
+	log.Printf("FINAL ERROR in %s: %s (jobId: %s, ImageURL: %s)", source, errMsg, jobId, imageURL)
+	NotifyErrorToWebhook(ctx, "ERROR", errMsg, jobId, imageURL, source)
 	return &customTypes.ErrorResponse{
 		Message:   errMsg,
-		JobID:     jobID,
+		JobId:     jobId,
 		ImageURL:  imageURL,
 		ErrorCode: source,
 	}, nil

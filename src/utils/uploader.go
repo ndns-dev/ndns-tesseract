@@ -53,13 +53,13 @@ func SaveOCRResult(ctx context.Context, result customTypes.OCRResults) error {
 // UpdateOCRJobDetails: OCR Job 상세 테이블(OCRJobDetails)을 업데이트
 func UpdateOCRJobDetails(ctx context.Context, result customTypes.OCRJobDetails) error {
 
-	if result.JobID == "" {
-		return fmt.Errorf("JobID cannot be empty when updating OCRJobDetails table")
+	if result.JobId == "" {
+		return fmt.Errorf("JobId cannot be empty when updating OCRJobDetails table")
 	}
 
 	item, err := attributevalue.MarshalMap(result)
 	if err != nil {
-		return fmt.Errorf("failed to marshal job details item for JobID %s: %w", result.JobID, err)
+		return fmt.Errorf("failed to marshal job details item for JobId %s: %w", result.JobId, err)
 	}
 
 	_, err = dbClient.PutItem(ctx, &dynamodb.PutItemInput{
@@ -67,7 +67,7 @@ func UpdateOCRJobDetails(ctx context.Context, result customTypes.OCRJobDetails) 
 		Item:      item,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to put item in OCRJobDetails DynamoDB table for JobID %s: %w", result.JobID, err)
+		return fmt.Errorf("failed to put item in OCRJobDetails DynamoDB table for JobId %s: %w", result.JobId, err)
 	}
 	return nil
 }

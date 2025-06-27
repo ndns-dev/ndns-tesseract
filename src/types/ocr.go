@@ -10,7 +10,7 @@ const (
 
 // OCRJobDetails 타입은 API요청에 대한 응답을 저장하는 데 사용됩니다.
 type OCRJobDetails struct {
-	JobID     string    `json:"jobId" dynamodbav:"jobId,omitempty"`
+	JobId     string    `json:"JobId" dynamodbav:"JobId,omitempty"`
 	ImageURL  string    `json:"imageUrl" dynamodbav:"imageUrl,omitempty"`
 	OCRText   string    `json:"ocrText" dynamodbav:"ocrText,omitempty"`
 	Status    JobStatus `json:"status" dynamodbav:"status,omitempty"`
