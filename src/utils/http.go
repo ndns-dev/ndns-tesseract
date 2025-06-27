@@ -2,6 +2,7 @@ package utils
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/url"
@@ -24,9 +25,9 @@ func ParseFormURLEncoded(body string) map[string]string {
 	return result
 }
 
-func Response(errResp *customTypes.ErrorResponse, err error) (interface{}, error) {
+func Response(data interface{}, err error) (interface{}, error) {
 	if err != nil {
-		if errResp != nil {
+		if errResp, ok := data.(*customTypes.ErrorResponse); ok && errResp != nil {
 			return &events.APIGatewayProxyResponse{
 				StatusCode: 400,
 				Body:       fmt.Sprintf(`{"message": "%s", "jobId": "%s", "imageUrl": "%s", "errorCode": "%s"}`, errResp.Message, errResp.JobId, errResp.ImageURL, errResp.ErrorCode),
@@ -44,9 +45,26 @@ func Response(errResp *customTypes.ErrorResponse, err error) (interface{}, error
 		}, nil
 	}
 
+	var responseBody string
+	if data != nil {
+		jsonData, err := json.Marshal(data)
+		if err != nil {
+			return &events.APIGatewayProxyResponse{
+				StatusCode: 500,
+				Body:       fmt.Sprintf(`{"message": "Failed to marshal response: %s"}`, err.Error()),
+				Headers: map[string]string{
+					"Content-Type": "application/json",
+				},
+			}, nil
+		}
+		responseBody = string(jsonData)
+	} else {
+		responseBody = `{"message": "success"}`
+	}
+
 	return &events.APIGatewayProxyResponse{
 		StatusCode: 200,
-		Body:       `{"message": "success"}`,
+		Body:       responseBody,
 		Headers: map[string]string{
 			"Content-Type": "application/json",
 		},
