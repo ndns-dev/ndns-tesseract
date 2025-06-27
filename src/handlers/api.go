@@ -58,6 +58,6 @@ func HandleAPIGatewayEvent(ctx context.Context, e events.APIGatewayProxyRequest)
 		log.Printf("Successfully parsed JSON request body")
 	}
 
-	errResp, err := services.ProcessOcrRequest(ctx, queueState)
+	errResp, err := services.HandleOcrWorkflow(ctx, queueState)
 	return utils.Response(errResp, err)
 }
