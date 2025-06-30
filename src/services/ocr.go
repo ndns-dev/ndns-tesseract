@@ -34,7 +34,7 @@ func HandleOcrWorkflow(ctx context.Context, queueState customTypes.OcrQueueState
 		return nil, fmt.Errorf("failed to marshal analyze payload: %w", err)
 	}
 
-	apiUrl := os.Getenv("API_URL") + "/api/v1/search/analyze"
+	apiUrl := os.Getenv("API_URL") + "/api/v1/search/analyze/cycle"
 	resp, err := http.Post(apiUrl, "application/json", bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		return nil, fmt.Errorf("failed to call analyze API: %w", err)
