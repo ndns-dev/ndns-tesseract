@@ -27,6 +27,7 @@ func HandleAPIGatewayEvent(ctx context.Context, e events.APIGatewayProxyRequest)
 		log.Printf("Parsed form data: %+v", formData)
 
 		// queueState에 값 할당
+		queueState.ReqId = formData["reqId"]
 		queueState.JobId = formData["jobId"]
 		queueState.CurrentPosition = customTypes.OcrPosition(formData["currentPosition"])
 		queueState.Is2025OrLater, _ = strconv.ParseBool(formData["is2025OrLater"])
@@ -44,7 +45,8 @@ func HandleAPIGatewayEvent(ctx context.Context, e events.APIGatewayProxyRequest)
 		}
 
 		// 디버그 로깅
-		log.Printf("Constructed queueState from form data - JobId: %s, Position: %s, URL: %s",
+		log.Printf("Constructed queueState from form data - ReqId: %s, JobId: %s, Position: %s, URL: %s",
+			queueState.ReqId,
 			queueState.JobId,
 			queueState.CurrentPosition,
 			queueState.CrawlResult.Url)

@@ -38,6 +38,7 @@ func HandleSQSEvent(ctx context.Context, e events.SQSEvent) (interface{}, error)
 		}
 
 		// queueState에 값 할당
+		queueState.ReqId = getString(bodyMap, "reqId")
 		queueState.JobId = getString(bodyMap, "jobId")
 		queueState.CurrentPosition = customTypes.OcrPosition(getString(bodyMap, "currentPosition"))
 		queueState.Is2025OrLater, _ = strconv.ParseBool(getString(bodyMap, "is2025OrLater"))
@@ -62,7 +63,8 @@ func HandleSQSEvent(ctx context.Context, e events.SQSEvent) (interface{}, error)
 		}
 
 		// 디버그 로깅
-		log.Printf("Parsed queueState from SQS message - JobId: %s, Position: %s, URL: %s",
+		log.Printf("Parsed queueState from SQS message - ReqId: %s, JobId: %s, Position: %s, URL: %s",
+			queueState.ReqId,
 			queueState.JobId,
 			queueState.CurrentPosition,
 			queueState.CrawlResult.Url)

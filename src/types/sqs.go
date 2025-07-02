@@ -4,12 +4,14 @@ import "time"
 
 // OcrQueueState는 Ocr 처리 상태를 관리합니다
 type OcrQueueState struct {
-	JobId           string       `json:"JobId" dynamodbav:"JobId"`                     // 프라이머리 키
-	CrawlResult     *CrawlResult `json:"crawlResult" dynamodbav:"crawlResult"`         // 크롤링 결과
-	CurrentPosition OcrPosition  `json:"currentPosition" dynamodbav:"currentPosition"` // 현재 Ocr 위치
-	Is2025OrLater   bool         `json:"is2025OrLater" dynamodbav:"is2025OrLater"`     // 2025년 이후 여부
-	RequestedAt     time.Time    `json:"requestedAt" dynamodbav:"requestedAt"`         // 요청 시간
+	JobId           string       `json:"jobId" dynamodbav:"jobId"`                                 // 작업 ID
+	ReqId           string       `json:"reqId" dynamodbav:"reqId"`                                 // 요청 ID (SSE 매핑용)
+	CurrentPosition OcrPosition  `json:"currentPosition" dynamodbav:"currentPosition"`             // 현재 OCR 위치
+	Is2025OrLater   bool         `json:"is2025OrLater" dynamodbav:"is2025OrLater"`                 // 2025년 이후 포스트 여부
+	CrawlResult     *CrawlResult `json:"crawlResult,omitempty" dynamodbav:"crawlResult,omitempty"` // 크롤링 결과
+	RequestedAt     time.Time    `json:"requestedAt" dynamodbav:"requestedAt"`                     // 요청 시간
 }
+
 type CrawlResult struct {
 	Url              string
 	FirstParagraph   string
