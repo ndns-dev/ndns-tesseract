@@ -26,8 +26,9 @@ func HandleOcrWorkflow(ctx context.Context, queueState customTypes.OcrQueueState
 	}
 
 	// 2. 분석 API 호출
-	analyzePayload := map[string]string{
-		"text": result.OcrText,
+	analyzePayload := customTypes.AnalyzeCycleParam{
+		Result: *result,
+		State:  queueState,
 	}
 	jsonPayload, err := json.Marshal(analyzePayload)
 	if err != nil {

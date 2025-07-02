@@ -7,3 +7,8 @@ type ErrorResponse struct {
 	ImageURL  string `json:"imageUrl,omitempty"`
 	ErrorCode string `json:"errorCode"`
 }
+
+type AnalyzeCycleParam struct {
+	State  OcrQueueState `json:"state"`
+	Result OcrResult     `json:"result"`
+}
