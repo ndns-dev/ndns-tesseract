@@ -52,8 +52,12 @@ func PerformOCR(imageUrl string) (string, error) {
 		return "", errors.New(errMsg)
 	}
 
-	OcrResult := strings.TrimSpace(stdout.String())
-	log.Printf("Tesseract stdout: %s", OcrResult)
+	// OCR 결과에서 줄바꿈 문자를 공백으로 변환
+	cleanedOutput := strings.ReplaceAll(stdout.String(), "\n", " ")
+	cleanedOutput = strings.ReplaceAll(cleanedOutput, "\r", " ")
+
+	OcrResult := strings.TrimSpace(cleanedOutput)
+	log.Printf("Tesseract stdout (cleaned): %s", OcrResult)
 
 	return OcrResult, nil
 }
