@@ -13,15 +13,15 @@ type OcrQueueState struct {
 }
 
 type CrawlResult struct {
-	Url              string
-	FirstParagraph   string
-	LastParagraph    string
-	Content          string
-	FirstImageUrl    string
-	LastImageUrl     string
-	FirstStickerUrl  string
-	SecondStickerUrl string
-	LastStickerUrl   string
+	Url              string `json:"url" dynamodbav:"url"`
+	FirstParagraph   string `json:"firstParagraph" dynamodbav:"firstParagraph"`
+	LastParagraph    string `json:"lastParagraph" dynamodbav:"lastParagraph"`
+	Content          string `json:"content" dynamodbav:"content"`
+	FirstImageUrl    string `json:"firstImageUrl" dynamodbav:"firstImageUrl"`
+	LastImageUrl     string `json:"lastImageUrl" dynamodbav:"lastImageUrl"`
+	FirstStickerUrl  string `json:"firstStickerUrl" dynamodbav:"firstStickerUrl"`
+	SecondStickerUrl string `json:"secondStickerUrl" dynamodbav:"secondStickerUrl"`
+	LastStickerUrl   string `json:"lastStickerUrl" dynamodbav:"lastStickerUrl"`
 }
 
 // GetImageUrlByPosition은 OcrPosition에 해당하는 이미지 URL을 반환합니다.
