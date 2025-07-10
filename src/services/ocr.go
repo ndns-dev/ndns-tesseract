@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -43,6 +44,14 @@ func HandleOcrWorkflow(ctx context.Context, queueState customTypes.OcrQueueState
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		// 응답 본문 읽기
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.Printf("failed to read error response body: %v", err)
+		} else {
+			log.Printf("analyze API error response: %s", string(body))
+		}
+		log.Printf("analyze API returned non-200 status: %v", apiUrl)
 		return nil, fmt.Errorf("analyze API returned non-200 status: %d", resp.StatusCode)
 	}
 
