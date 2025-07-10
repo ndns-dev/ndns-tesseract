@@ -36,7 +36,12 @@ func HandleOcrWorkflow(ctx context.Context, queueState customTypes.OcrQueueState
 		return nil, fmt.Errorf("failed to marshal analyze payload: %w", err)
 	}
 
+	// API 요청 데이터 로깅
+	log.Printf("Sending analyze API request with payload: %s", string(jsonPayload))
+
 	apiUrl := os.Getenv("API_URL") + "/api/v1/search/analyze/cycle"
+	log.Printf("Calling analyze API at URL: %s", apiUrl)
+
 	resp, err := http.Post(apiUrl, "application/json", bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		return nil, fmt.Errorf("failed to call analyze API: %w", err)
@@ -51,9 +56,13 @@ func HandleOcrWorkflow(ctx context.Context, queueState customTypes.OcrQueueState
 		} else {
 			log.Printf("analyze API error response: %s", string(body))
 		}
-		log.Printf("analyze API returned non-200 status: %v", apiUrl)
+		log.Printf("analyze API returned non-200 status: %v, status code: %d", apiUrl, resp.StatusCode)
 		return nil, fmt.Errorf("analyze API returned non-200 status: %d", resp.StatusCode)
 	}
+
+	// 응답 내용 로깅 (성공 시에도)
+	respBody, _ := io.ReadAll(resp.Body)
+	log.Printf("analyze API response: %s", string(respBody))
 
 	// 3. DynamoDB에 저장
 	dynamoClient := utils.GetDynamoDBClient(ctx)
@@ -111,10 +120,14 @@ func ProcessOcrRequest(ctx context.Context, queueState customTypes.OcrQueueState
 	}
 
 	// 이미지 URL 가져오기
+	log.Printf("Attempting to get image URL for position: %s", queueState.CurrentPosition)
+	log.Printf("CrawlResult details: %+v", queueState.CrawlResult)
 	imageUrl := queueState.CrawlResult.GetImageUrlByPosition(queueState.CurrentPosition)
 	if imageUrl == "" {
+		log.Printf("Failed to get image URL. CrawlResult: %+v, Position: %s", queueState.CrawlResult, queueState.CurrentPosition)
 		return nil, fmt.Errorf("no image URL found for position: %s", queueState.CurrentPosition)
 	}
+	log.Printf("Successfully got image URL: %s", imageUrl)
 
 	OcrResult, err := utils.PerformOCR(imageUrl)
 	if err != nil {
