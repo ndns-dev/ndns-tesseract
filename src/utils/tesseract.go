@@ -21,16 +21,51 @@ func PerformOCR(imageUrl string) (string, error) {
 	imageBytes, err := FetchImageBytes(imageUrl)
 	if err != nil {
 		log.Printf("ERROR: Failed to fetch image bytes from URL %s: %v", imageUrl, err)
-		return "", fmt.Errorf("Failed to fetch image: %v", err)
+		return "", fmt.Errorf("failed to fetch image: %v", err)
 	}
 	log.Printf("Image fetched. Size: %d bytes", len(imageBytes))
 
+	// 2. 임시 파일로 저장
+	tempFile, err := os.CreateTemp("", "ocr_image_*.jpg")
+	if err != nil {
+		log.Printf("ERROR: Failed to create temp file: %v", err)
+		return "", fmt.Errorf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+	defer tempFile.Close()
+
+	// 이미지 바이트를 임시 파일에 저장
+	_, err = tempFile.Write(imageBytes)
+	if err != nil {
+		log.Printf("ERROR: Failed to write image to temp file: %v", err)
+		return "", fmt.Errorf("failed to write image to temp file: %v", err)
+	}
+	tempFile.Close()
+
+	// 3. 이미지 최적화 (크롭)
+	log.Printf("Optimizing image for OCR...")
+	optimizedImagePath, err := CropImageOptimal(tempFile.Name())
+	if err != nil {
+		log.Printf("WARNING: Failed to optimize image, using original: %v", err)
+		optimizedImagePath = tempFile.Name()
+	} else {
+		log.Printf("Image optimized successfully: %s", optimizedImagePath)
+	}
+
+	// 4. 최적화된 이미지를 바이트로 다시 읽기
+	optimizedImageBytes, err := os.ReadFile(optimizedImagePath)
+	if err != nil {
+		log.Printf("ERROR: Failed to read optimized image: %v", err)
+		return "", fmt.Errorf("failed to read optimized image: %v", err)
+	}
+
+	// 5. Tesseract OCR 실행
 	cmd := exec.Command(tesseractCmdPath, "-", "stdout", "-l", "kor", "--tessdata-dir", tessdataPath,
 		"--psm", "6",
 		"--oem", "3",
 		"-c", "preserve_interword_spaces=1")
 
-	cmd.Stdin = bytes.NewReader(imageBytes)
+	cmd.Stdin = bytes.NewReader(optimizedImageBytes)
 	env := os.Environ()
 	cmd.Env = env
 
