@@ -30,8 +30,6 @@ func HandleSQSEvent(ctx context.Context, e events.SQSEvent) (interface{}, error)
 		var queueState customTypes.OcrQueueState
 		var bodyMap map[string]interface{}
 
-		log.Printf("Processing SQS message: %s", record.Body)
-
 		err := json.Unmarshal([]byte(record.Body), &bodyMap)
 		if err != nil {
 			return utils.Response(utils.ErrorHandler(ctx, fmt.Errorf("could not unmarshal SQS message body: %w", err), "", "", "SQSMessageUnmarshal"))
@@ -68,7 +66,7 @@ func HandleSQSEvent(ctx context.Context, e events.SQSEvent) (interface{}, error)
 			queueState.JobId,
 			queueState.CurrentPosition,
 			queueState.CrawlResult.Url)
-
+		utils.WebhookLog("ndns-tesseract: SQS RECEIVED: %s", queueState.JobId)
 		result, err := services.HandleOcrWorkflow(ctx, queueState)
 		if err != nil {
 			log.Printf("Error processing record: %v", err)
