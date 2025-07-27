@@ -74,11 +74,12 @@ func Response(data interface{}, err error) (interface{}, error) {
 func ErrorHandler(ctx context.Context, err error, jobId, imageURL, source string) (*customTypes.ErrorResponse, error) {
 	errMsg := err.Error()
 	log.Printf("FINAL ERROR in %s: %s (jobId: %s, ImageURL: %s)", source, errMsg, jobId, imageURL)
-	NotifyErrorToWebhook(ctx, "ERROR", errMsg, jobId, imageURL, source)
-	return &customTypes.ErrorResponse{
+	errData := &customTypes.ErrorResponse{
 		Message:   errMsg,
 		JobId:     jobId,
 		ImageURL:  imageURL,
 		ErrorCode: source,
-	}, nil
+	}
+	WebhookLog("ERROR: %s", errData)
+	return errData, nil
 }
